@@ -75,7 +75,7 @@
 
   try {
     // Dateiname exakt wie im Repo: Anschlagmittel.csv
-    const res = await fetch("./Anschlagmittel.csv?ts=" + Date.now());
+    const res = await fetch("/nfc-test/Anschlagmittel.csv?ts=" + Date.now());
     if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status);
 
     const csvText = await res.text();
@@ -109,3 +109,4 @@
   }
 })();
 </script>
+
