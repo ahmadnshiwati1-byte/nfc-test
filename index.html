@@ -1,39 +1,132 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Digitale Prüfplakette</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; margin:0; padding:0; }
+    .card { max-width:420px; margin:30px auto; background:#fff; border-radius:12px; box-shadow:0 4px 10px rgba(0,0,0,0.1); padding:20px; }
+    .status { font-size:22px; font-weight:bold; padding:12px; border-radius:8px; text-align:center; margin-bottom:20px; }
+    .ok { background:#e6f4ea; color:#137333; }
+    .bad { background:#fdecea; color:#a50e0e; }
+    .row { margin-bottom:10px; }
+    .label { color:#666; font-size:14px; }
+    .value { font-size:16px; }
+    footer { margin-top:20px; font-size:12px; color:#888; text-align:center; }
+    .hint { font-size:13px; color:#666; margin-top:10px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="status ok" id="statusBox">🟢 Betriebssicher</div>
+
+  <div class="row">
+    <div class="label">Anschlagmittel</div>
+    <div class="value" id="typ">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Tragfähigkeit (WLL)</div>
+    <div class="value" id="wll">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Serviceartikel-Nr.</div>
+    <div class="value" id="assetId">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Letzte Prüfung</div>
+    <div class="value" id="letzte">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Nächste Prüfung</div>
+    <div class="value" id="naechste">—</div>
+  </div>
+
+  <div class="hint" id="hint"></div>
+
+  <footer>
+    Digitale Prüfplakette · ISM Gruppe
+  </footer>
+</div>
+
 <script>
+(function () {
   const elStatus = document.getElementById("statusBox");
   const elId = document.getElementById("assetId");
   const elTyp = document.getElementById("typ");
   const elWll = document.getElementById("wll");
   const elLetzte = document.getElementById("letzte");
   const elNaechste = document.getElementById("naechste");
+  const elHint = document.getElementById("hint");
+
+  // Falls irgendwas fehlt: nicht abstürzen, sondern Hinweis anzeigen
+  if (!elStatus || !elId || !elTyp || !elWll || !elLetzte || !elNaechste) {
+    document.body.innerHTML = "<div style='padding:20px;font-family:Arial'>Fehler: HTML-IDs fehlen (statusBox/assetId/typ/wll/letzte/naechste).</div>";
+    return;
+  }
+
+  function setHint(msg) { elHint.textContent = msg || ""; }
 
   function setStatus(raw) {
-    const s = (raw || "").toLowerCase().trim();
+    const s = (raw || "").toString().trim().toLowerCase();
     elStatus.classList.remove("ok", "bad");
 
     if (s === "ok") {
       elStatus.classList.add("ok");
       elStatus.textContent = "🟢 Betriebssicher";
     } else if (s === "fällig" || s === "faellig") {
-      elStatus.classList.add("bad");
+      elStatus.classList.add("bad");   // (später können wir gelb ergänzen)
       elStatus.textContent = "🟡 Prüfung fällig";
-    } else {
+    } else if (s === "gesperrt" || s === "blocked") {
       elStatus.classList.add("bad");
       elStatus.textContent = "🔴 Gesperrt";
+    } else {
+      elStatus.classList.add("bad");
+      elStatus.textContent = "🔴 Status unbekannt";
     }
   }
 
-  function parseCSV(text) {
-    const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim());
-    const headers = lines[0].split(";").map(h => h.trim().toLowerCase());
-    const rows = [];
+  // CSV Parser: erkennt automatisch ; oder ,
+  function detectDelimiter(headerLine) {
+    const semi = (headerLine.match(/;/g) || []).length;
+    const comma = (headerLine.match(/,/g) || []).length;
+    return semi >= comma ? ";" : ",";
+  }
 
+  function splitLine(line, delim) {
+    // einfach & robust genug für normale Excel-CSV
+    return line.split(delim).map(x => x.trim());
+  }
+
+  function normalizeHeader(h) {
+    return (h || "")
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/\uFEFF/g, ""); // BOM entfernen
+  }
+
+  function parseCSV(text) {
+    const cleaned = text.replace(/\r/g, "").trim();
+    const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return { rows: [], delim: ";" };
+
+    const delim = detectDelimiter(lines[0]);
+    const headers = splitLine(lines[0], delim).map(normalizeHeader);
+
+    const rows = [];
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(";").map(c => c.trim());
+      const cols = splitLine(lines[i], delim);
       const row = {};
-      headers.forEach((h, idx) => row[h] = cols[idx] || "");
+      headers.forEach((h, idx) => row[h] = (cols[idx] ?? "").trim());
       rows.push(row);
     }
-    return rows;
+    return { rows, delim };
   }
 
   async function main() {
@@ -41,26 +134,35 @@
     const id = params.get("id");
 
     if (!id) {
-      elTyp.textContent = "Bitte URL mit ?id=...";
+      elId.textContent = "—";
+      elTyp.textContent = "Bitte URL mit ?id=... öffnen";
       setStatus("fällig");
+      setHint("Beispiel: ?id=4711");
       return;
     }
 
     elId.textContent = id;
+    setHint("");
 
     try {
-      // HIER: dein Dateiname
-      const res = await fetch("Anschlagmittel.csv?ts=" + Date.now());
-      if (!res.ok) throw new Error("CSV nicht gefunden");
+      // WICHTIG: Dateiname exakt wie im Repo (Groß-/Kleinschreibung!)
+      const res = await fetch("./Anschlagmittel.csv?ts=" + Date.now());
+      if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status);
 
-      const csv = await res.text();
-      const rows = parseCSV(csv);
+      const csvText = await res.text();
+      const { rows } = parseCSV(csvText);
 
-      const asset = rows.find(r => r["serviceartikel-nr"] === id);
+      // Spaltennamen aus deinem Screenshot:
+      // "Serviceartikel-NR", "status", "typ", "Tragfähigkeit", "letzte Prüfung", "nächste Prüfung"
+      const asset = rows.find(r => (r["serviceartikel-nr"] || "") === id);
 
       if (!asset) {
-        elTyp.textContent = "Unbekanntes Anschlagmittel";
+        elTyp.textContent = "Unbekannt (ID nicht gefunden)";
+        elWll.textContent = "—";
+        elLetzte.textContent = "—";
+        elNaechste.textContent = "—";
         setStatus("gesperrt");
+        setHint("ID nicht in CSV gefunden.");
         return;
       }
 
@@ -72,10 +174,18 @@
 
     } catch (e) {
       elTyp.textContent = "Fehler beim Laden der CSV";
+      elWll.textContent = "—";
+      elLetzte.textContent = "—";
+      elNaechste.textContent = "—";
       setStatus("gesperrt");
+      setHint(String(e));
       console.error(e);
     }
   }
 
   main();
+})();
 </script>
+
+</body>
+</html>
