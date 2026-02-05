@@ -146,7 +146,7 @@
 
     try {
       // WICHTIG: Dateiname exakt wie im Repo (Groß-/Kleinschreibung!)
-      const res = await fetch("./Anschlagmittel.csv?ts=" + Date.now());
+      const res = await fetch("./anschlagmittel.csv?ts=" + Date.now());
       if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status);
 
       const csvText = await res.text();
@@ -189,3 +189,4 @@
 
 </body>
 </html>
+
