@@ -111,7 +111,7 @@
     elId.textContent = id;
 
     try {
-      const res = await fetch("assets.csv?ts=" + Date.now());
+      const res = await fetch("Anschlagmittel.csv?ts=" + Date.now());
       if (!res.ok) throw new Error("assets.csv nicht gefunden");
 
       const csvText = await res.text();
@@ -154,3 +154,4 @@
 
   main();
 </script>
+
