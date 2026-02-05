@@ -6,22 +6,15 @@
   const elLetzte = document.getElementById("letzte");
   const elNaechste = document.getElementById("naechste");
 
-  function setStatus(statusRaw) {
-    const s = (statusRaw || "").toString().trim().toLowerCase();
-
-    // Mapping DE -> intern
-    let status = "blocked";
-    if (s === "ok") status = "ok";
-    else if (s === "fällig" || s === "faellig") status = "due";
-    else if (s === "gesperrt") status = "blocked";
-
+  function setStatus(raw) {
+    const s = (raw || "").toLowerCase().trim();
     elStatus.classList.remove("ok", "bad");
 
-    if (status === "ok") {
+    if (s === "ok") {
       elStatus.classList.add("ok");
       elStatus.textContent = "🟢 Betriebssicher";
-    } else if (status === "due") {
-      elStatus.classList.add("bad"); // wenn du gelb willst: sag Bescheid, ich ergänze CSS
+    } else if (s === "fällig" || s === "faellig") {
+      elStatus.classList.add("bad");
       elStatus.textContent = "🟡 Prüfung fällig";
     } else {
       elStatus.classList.add("bad");
@@ -29,69 +22,18 @@
     }
   }
 
-  // CSV Utilities
-  function detectDelimiter(headerLine) {
-    const semi = (headerLine.match(/;/g) || []).length;
-    const comma = (headerLine.match(/,/g) || []).length;
-    return semi > comma ? ";" : ",";
-  }
-
-  function splitCSVLine(line, delimiter) {
-    const result = [];
-    let cur = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-        else inQuotes = !inQuotes;
-      } else if (ch === delimiter && !inQuotes) {
-        result.push(cur);
-        cur = "";
-      } else {
-        cur += ch;
-      }
-    }
-    result.push(cur);
-    return result;
-  }
-
-  function normalizeHeader(h) {
-    return (h || "")
-      .toString()
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .replace(/-+/g, "-");
-  }
-
   function parseCSV(text) {
-    const cleaned = text.replace(/\r/g, "").replace(/^\uFEFF/, ""); // BOM weg
-    const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
-    if (lines.length < 2) return { rows: [], headers: [], delimiter: "," };
-
-    const delimiter = detectDelimiter(lines[0]);
-    const headersRaw = splitCSVLine(lines[0], delimiter).map(h => h.trim());
-    const headers = headersRaw.map(normalizeHeader);
-
+    const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim());
+    const headers = lines[0].split(";").map(h => h.trim().toLowerCase());
     const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cols = splitCSVLine(lines[i], delimiter);
-      const obj = {};
-      headers.forEach((h, idx) => obj[h] = (cols[idx] ?? "").trim());
-      rows.push(obj);
-    }
-    return { rows, headers, delimiter };
-  }
 
-  function getField(row, possibleHeaders) {
-    for (const h of possibleHeaders) {
-      const key = normalizeHeader(h);
-      if (row[key] !== undefined && row[key] !== "") return row[key];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(";").map(c => c.trim());
+      const row = {};
+      headers.forEach((h, idx) => row[h] = cols[idx] || "");
+      rows.push(row);
     }
-    return "";
+    return rows;
   }
 
   async function main() {
@@ -99,11 +41,7 @@
     const id = params.get("id");
 
     if (!id) {
-      elId.textContent = "—";
-      elTyp.textContent = "Bitte URL mit ?id=... öffnen";
-      elWll.textContent = "—";
-      elLetzte.textContent = "—";
-      elNaechste.textContent = "—";
+      elTyp.textContent = "Bitte URL mit ?id=...";
       setStatus("fällig");
       return;
     }
@@ -111,42 +49,29 @@
     elId.textContent = id;
 
     try {
+      // HIER: dein Dateiname
       const res = await fetch("Anschlagmittel.csv?ts=" + Date.now());
-      if (!res.ok) throw new Error("assets.csv nicht gefunden");
+      if (!res.ok) throw new Error("CSV nicht gefunden");
 
-      const csvText = await res.text();
-      const { rows } = parseCSV(csvText);
+      const csv = await res.text();
+      const rows = parseCSV(csv);
 
-      // Deine Spaltennamen (mit Varianten)
-      const idHeaders = ["Serviceartikel-NR", "Serviceartikel-Nr.", "Serviceartikel-Nr", "Serviceartikel-NR."];
-      const statusHeaders = ["status"];
-      const typHeaders = ["typ", "Anschlagmittel"];
-      const wllHeaders = ["Tragfähigkeit", "Tragfaehigkeit", "WLL", "Tragfähigkeit (WLL)"];
-      const letzteHeaders = ["letzte Prüfung", "letzte pruefung", "Letzte Prüfung"];
-      const naechsteHeaders = ["nächste Prüfung", "naechste pruefung", "Nächste Prüfung"];
-
-      const asset = rows.find(r => getField(r, idHeaders).trim() === id);
+      const asset = rows.find(r => r["serviceartikel-nr"] === id);
 
       if (!asset) {
-        elTyp.textContent = "Unbekannt (ID nicht gefunden)";
-        elWll.textContent = "—";
-        elLetzte.textContent = "—";
-        elNaechste.textContent = "—";
+        elTyp.textContent = "Unbekanntes Anschlagmittel";
         setStatus("gesperrt");
         return;
       }
 
-      elTyp.textContent = getField(asset, typHeaders) || "—";
-      elWll.textContent = getField(asset, wllHeaders) || "—";
-      elLetzte.textContent = getField(asset, letzteHeaders) || "—";
-      elNaechste.textContent = getField(asset, naechsteHeaders) || "—";
-      setStatus(getField(asset, statusHeaders));
+      elTyp.textContent = asset["typ"] || "—";
+      elWll.textContent = asset["tragfähigkeit"] || "—";
+      elLetzte.textContent = asset["letzte prüfung"] || "—";
+      elNaechste.textContent = asset["nächste prüfung"] || "—";
+      setStatus(asset["status"]);
 
     } catch (e) {
       elTyp.textContent = "Fehler beim Laden der CSV";
-      elWll.textContent = "—";
-      elLetzte.textContent = "—";
-      elNaechste.textContent = "—";
       setStatus("gesperrt");
       console.error(e);
     }
@@ -154,4 +79,3 @@
 
   main();
 </script>
-
