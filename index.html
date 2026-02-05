@@ -75,10 +75,14 @@
 
   try {
     // Dateiname exakt wie im Repo: Anschlagmittel.csv
-    const res = await fetch("/nfc-test/Anschlagmittel.csv?ts=" + Date.now());
-    if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status);
+    // Repo-Name automatisch aus der URL holen (bei GitHub Pages: /<repo>/...)
+    const repo = location.pathname.split("/")[1];  // z.B. "nfc-test"
+    const csvUrl = `${location.origin}/${repo}/Anschlagmittel.csv`;
 
+    const res = await fetch(csvUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status + " (" + csvUrl + ")");
     const csvText = await res.text();
+
     const rows = parseCSV(csvText);
 
     // Spaltennamen exakt wie bei dir:
@@ -109,4 +113,5 @@
   }
 })();
 </script>
+
 
