@@ -1,99 +1,156 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <title>Digitale Prüfplakette</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f4f6f8;
-      margin: 0;
-      padding: 0;
-    }
-    .card {
-      max-width: 420px;
-      margin: 30px auto;
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      padding: 20px;
-    }
-    .status {
-      font-size: 22px;
-      font-weight: bold;
-      padding: 12px;
-      border-radius: 8px;
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .ok { background: #e6f4ea; color: #137333; }
-    .bad { background: #fdecea; color: #a50e0e; }
-    .row {
-      margin-bottom: 10px;
-    }
-    .label {
-      color: #666;
-      font-size: 14px;
-    }
-    .value {
-      font-size: 16px;
-    }
-    footer {
-      margin-top: 20px;
-      font-size: 12px;
-      color: #888;
-      text-align: center;
-    }
-  </style>
-</head>
-<body>
-
-<div class="card">
-  <div class="status ok">🟢 Betriebssicher</div>
-
-  <div class="row">
-    <div class="label">Anschlagmittel</div>
-    <div class="value">Rundschlinge</div>
-  </div>
-
-  <div class="row">
-    <div class="label">Tragfähigkeit (WLL)</div>
-    <div class="value">1.000 kg</div>
-  </div>
-
-  <div class="row">
-    <div class="label">Serviceartikel-Nr.</div>
-    <div class="value" id="assetId">—</div>
-  </div>
-
-  <div class="row">
-    <div class="label">Letzte Prüfung</div>
-    <div class="value">12.09.2025</div>
-  </div>
-
-  <div class="row">
-    <div class="label">Nächste Prüfung</div>
-    <div class="value">09.2026</div>
-  </div>
-
-  <footer>
-    Digitale Prüfplakette · ISM Gruppe
-  </footer>
-</div>
 <script>
-  // Liest ?id=4711 aus der URL und zeigt es an
-  const params = new URLSearchParams(window.location.search);
-  const id = params.get("id");
+  const elStatus = document.getElementById("statusBox");
+  const elId = document.getElementById("assetId");
+  const elTyp = document.getElementById("typ");
+  const elWll = document.getElementById("wll");
+  const elLetzte = document.getElementById("letzte");
+  const elNaechste = document.getElementById("naechste");
 
-  if (id) {
-    document.getElementById("assetId").textContent = id;
+  function setStatus(statusRaw) {
+    const s = (statusRaw || "").toString().trim().toLowerCase();
+
+    // Mapping DE -> intern
+    let status = "blocked";
+    if (s === "ok") status = "ok";
+    else if (s === "fällig" || s === "faellig") status = "due";
+    else if (s === "gesperrt") status = "blocked";
+
+    elStatus.classList.remove("ok", "bad");
+
+    if (status === "ok") {
+      elStatus.classList.add("ok");
+      elStatus.textContent = "🟢 Betriebssicher";
+    } else if (status === "due") {
+      elStatus.classList.add("bad"); // wenn du gelb willst: sag Bescheid, ich ergänze CSS
+      elStatus.textContent = "🟡 Prüfung fällig";
+    } else {
+      elStatus.classList.add("bad");
+      elStatus.textContent = "🔴 Gesperrt";
+    }
   }
+
+  // CSV Utilities
+  function detectDelimiter(headerLine) {
+    const semi = (headerLine.match(/;/g) || []).length;
+    const comma = (headerLine.match(/,/g) || []).length;
+    return semi > comma ? ";" : ",";
+  }
+
+  function splitCSVLine(line, delimiter) {
+    const result = [];
+    let cur = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === delimiter && !inQuotes) {
+        result.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  function normalizeHeader(h) {
+    return (h || "")
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/-+/g, "-");
+  }
+
+  function parseCSV(text) {
+    const cleaned = text.replace(/\r/g, "").replace(/^\uFEFF/, ""); // BOM weg
+    const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return { rows: [], headers: [], delimiter: "," };
+
+    const delimiter = detectDelimiter(lines[0]);
+    const headersRaw = splitCSVLine(lines[0], delimiter).map(h => h.trim());
+    const headers = headersRaw.map(normalizeHeader);
+
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitCSVLine(lines[i], delimiter);
+      const obj = {};
+      headers.forEach((h, idx) => obj[h] = (cols[idx] ?? "").trim());
+      rows.push(obj);
+    }
+    return { rows, headers, delimiter };
+  }
+
+  function getField(row, possibleHeaders) {
+    for (const h of possibleHeaders) {
+      const key = normalizeHeader(h);
+      if (row[key] !== undefined && row[key] !== "") return row[key];
+    }
+    return "";
+  }
+
+  async function main() {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+
+    if (!id) {
+      elId.textContent = "—";
+      elTyp.textContent = "Bitte URL mit ?id=... öffnen";
+      elWll.textContent = "—";
+      elLetzte.textContent = "—";
+      elNaechste.textContent = "—";
+      setStatus("fällig");
+      return;
+    }
+
+    elId.textContent = id;
+
+    try {
+      const res = await fetch("assets.csv?ts=" + Date.now());
+      if (!res.ok) throw new Error("assets.csv nicht gefunden");
+
+      const csvText = await res.text();
+      const { rows } = parseCSV(csvText);
+
+      // Deine Spaltennamen (mit Varianten)
+      const idHeaders = ["Serviceartikel-NR", "Serviceartikel-Nr.", "Serviceartikel-Nr", "Serviceartikel-NR."];
+      const statusHeaders = ["status"];
+      const typHeaders = ["typ", "Anschlagmittel"];
+      const wllHeaders = ["Tragfähigkeit", "Tragfaehigkeit", "WLL", "Tragfähigkeit (WLL)"];
+      const letzteHeaders = ["letzte Prüfung", "letzte pruefung", "Letzte Prüfung"];
+      const naechsteHeaders = ["nächste Prüfung", "naechste pruefung", "Nächste Prüfung"];
+
+      const asset = rows.find(r => getField(r, idHeaders).trim() === id);
+
+      if (!asset) {
+        elTyp.textContent = "Unbekannt (ID nicht gefunden)";
+        elWll.textContent = "—";
+        elLetzte.textContent = "—";
+        elNaechste.textContent = "—";
+        setStatus("gesperrt");
+        return;
+      }
+
+      elTyp.textContent = getField(asset, typHeaders) || "—";
+      elWll.textContent = getField(asset, wllHeaders) || "—";
+      elLetzte.textContent = getField(asset, letzteHeaders) || "—";
+      elNaechste.textContent = getField(asset, naechsteHeaders) || "—";
+      setStatus(getField(asset, statusHeaders));
+
+    } catch (e) {
+      elTyp.textContent = "Fehler beim Laden der CSV";
+      elWll.textContent = "—";
+      elLetzte.textContent = "—";
+      elNaechste.textContent = "—";
+      setStatus("gesperrt");
+      console.error(e);
+    }
+  }
+
+  main();
 </script>
-
-</body>
-</html>
-
-
-
-
