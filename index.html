@@ -1,3 +1,86 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Digitale Prüfplakette</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+    }
+    .card {
+      max-width: 420px;
+      margin: 30px auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+    .status {
+      font-size: 22px;
+      font-weight: bold;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .ok { background: #e6f4ea; color: #137333; }
+    .bad { background: #fdecea; color: #a50e0e; }
+
+    .row { margin-bottom: 10px; }
+    .label { color: #666; font-size: 14px; }
+    .value { font-size: 16px; }
+
+    footer {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="status ok" id="statusBox">🟢 Betriebssicher</div>
+
+  <div class="row">
+    <div class="label">Anschlagmittel</div>
+    <div class="value" id="typ">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Tragfähigkeit (WLL)</div>
+    <div class="value" id="wll">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Serviceartikel-Nr.</div>
+    <div class="value" id="assetId">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Letzte Prüfung</div>
+    <div class="value" id="letzte">—</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Nächste Prüfung</div>
+    <div class="value" id="naechste">—</div>
+  </div>
+
+  <!-- Debug wird nur gefüllt, wenn etwas schief läuft -->
+  <div class="row">
+    <div class="label">Debug</div>
+    <div class="value" id="debug">—</div>
+  </div>
+
+  <footer>Digitale Prüfplakette · ISM Gruppe</footer>
+</div>
+
 <script>
 (async function () {
   const elStatus = document.getElementById("statusBox");
@@ -6,9 +89,15 @@
   const elWll = document.getElementById("wll");
   const elLetzte = document.getElementById("letzte");
   const elNaechste = document.getElementById("naechste");
+  const elDebug = document.getElementById("debug");
+
+  function dbg(msg) {
+    if (elDebug) elDebug.textContent = msg || "—";
+  }
 
   if (!elStatus || !elId || !elTyp || !elWll || !elLetzte || !elNaechste) {
-    document.body.innerHTML = "<div style='padding:16px;font-family:Arial'>Fehler: HTML-IDs fehlen (statusBox, typ, wll, assetId, letzte, naechste).</div>";
+    document.body.innerHTML =
+      "<div style='padding:16px;font-family:Arial'>Fehler: HTML-IDs fehlen (statusBox, typ, wll, assetId, letzte, naechste).</div>";
     return;
   }
 
@@ -37,7 +126,8 @@
     return semi >= comma ? ";" : ",";
   }
 
-  function norm(s) {
+  function normHeader(s) {
+    // BOM entfernen + trim + lower
     return (s || "").toString().replace(/^\uFEFF/, "").trim().toLowerCase();
   }
 
@@ -46,7 +136,7 @@
     if (lines.length < 2) return [];
 
     const delim = detectDelimiter(lines[0]);
-    const headers = lines[0].split(delim).map(h => norm(h));
+    const headers = lines[0].split(delim).map(h => normHeader(h));
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
@@ -68,25 +158,25 @@
     elLetzte.textContent = "—";
     elNaechste.textContent = "—";
     setStatus("fällig");
+    dbg("Beispiel: ?id=4711");
     return;
   }
 
   elId.textContent = id;
+  dbg("—");
 
   try {
-    // Dateiname exakt wie im Repo: Anschlagmittel.csv
-    // Repo-Name automatisch aus der URL holen (bei GitHub Pages: /<repo>/...)
-    const repo = location.pathname.split("/")[1];  // z.B. "nfc-test"
-    const csvUrl = `${location.origin}/${repo}/Anschlagmittel.csv`;
+    // Robust: CSV relativ zur aktuellen Seite laden (funktioniert sicher auf GitHub Pages)
+    const csvUrl = new URL("Anschlagmittel.csv", window.location.href).toString();
 
     const res = await fetch(csvUrl, { cache: "no-store" });
     if (!res.ok) throw new Error("CSV nicht gefunden: " + res.status + " (" + csvUrl + ")");
-    const csvText = await res.text();
 
+    const csvText = await res.text();
     const rows = parseCSV(csvText);
 
-    // Spaltennamen exakt wie bei dir:
-    // Serviceartikel-NR | status | typ | Tragfähigkeit | letzte Prüfung | nächste Prüfung
+    // Spaltennamen aus deiner CSV (nach normHeader):
+    // serviceartikel-nr | status | typ | tragfähigkeit | letzte prüfung | nächste prüfung
     const asset = rows.find(r => (r["serviceartikel-nr"] || "") === id);
 
     if (!asset) {
@@ -95,6 +185,7 @@
       elLetzte.textContent = "—";
       elNaechste.textContent = "—";
       setStatus("gesperrt");
+      dbg("ID nicht in CSV gefunden: " + id);
       return;
     }
 
@@ -102,16 +193,19 @@
     elWll.textContent = asset["tragfähigkeit"] || "—";
     elLetzte.textContent = asset["letzte prüfung"] || "—";
     elNaechste.textContent = asset["nächste prüfung"] || "—";
-    setStatus(asset["status"]);
+    setStatus(asset["status"] || "gesperrt");
+    dbg("OK (CSV geladen)");
   } catch (e) {
     elTyp.textContent = "Fehler beim Laden der CSV";
     elWll.textContent = "—";
     elLetzte.textContent = "—";
     elNaechste.textContent = "—";
     setStatus("gesperrt");
+    dbg((e && e.message) ? e.message : String(e));
     console.error(e);
   }
 })();
 </script>
 
-
+</body>
+</html>
