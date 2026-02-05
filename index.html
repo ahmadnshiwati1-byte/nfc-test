@@ -64,7 +64,7 @@
 
   <div class="row">
     <div class="label">Serviceartikel-Nr.</div>
-    <div class="value">4711</div>
+    <div class="value" id="assetId">—</div>
   </div>
 
   <div class="row">
@@ -81,8 +81,18 @@
     Digitale Prüfplakette · ISM Gruppe
   </footer>
 </div>
+<script>
+  // Liest ?id=4711 aus der URL und zeigt es an
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id");
+
+  if (id) {
+    document.getElementById("assetId").textContent = id;
+  }
+</script>
 
 </body>
 </html>
+
 
 
